@@ -1,43 +1,73 @@
+
 import React from 'react';
-import { Play } from 'lucide-react';
+import { Play, ArrowLeft } from 'lucide-react';
+import { Story } from '../types';
 
 interface BookCoverProps {
+  story: Story;
   onStart: () => void;
+  onBack: () => void;
 }
 
-export const BookCover: React.FC<BookCoverProps> = ({ onStart }) => {
+const themeColors: Record<string, { bg: string, accent: string, text: string, button: string, border: string }> = {
+  green: { bg: 'bg-green-600', accent: 'bg-green-800', text: 'text-green-900', button: 'bg-yellow-400', border: 'border-green-800' },
+  orange: { bg: 'bg-orange-500', accent: 'bg-orange-700', text: 'text-orange-900', button: 'bg-yellow-300', border: 'border-orange-700' },
+  blue: { bg: 'bg-blue-600', accent: 'bg-blue-800', text: 'text-blue-900', button: 'bg-orange-400', border: 'border-blue-800' },
+  teal: { bg: 'bg-teal-600', accent: 'bg-teal-800', text: 'text-teal-900', button: 'bg-pink-400', border: 'border-teal-800' },
+  purple: { bg: 'bg-purple-600', accent: 'bg-purple-800', text: 'text-purple-900', button: 'bg-yellow-400', border: 'border-purple-800' },
+  red: { bg: 'bg-red-600', accent: 'bg-red-800', text: 'text-red-900', button: 'bg-yellow-400', border: 'border-red-800' },
+};
+
+export const BookCover: React.FC<BookCoverProps> = ({ story, onStart, onBack }) => {
+  const theme = themeColors[story.color] || themeColors.green;
+
   return (
-    <div className="min-h-screen bg-green-100 flex items-center justify-center p-4">
-      <div className="bg-green-600 rounded-r-3xl rounded-l-md p-2 max-w-2xl w-full book-shadow transform hover:rotate-1 transition-transform duration-500">
-        <div className="bg-white rounded-r-2xl rounded-l-sm border-l-8 border-green-800 p-8 md:p-12 flex flex-col items-center text-center h-full relative overflow-hidden">
+    <div className={`min-h-screen bg-gray-50 flex items-center justify-center p-4 font-['Fredoka']`}>
+      <div className={`${theme.bg} rounded-r-3xl rounded-l-md p-2 max-w-2xl w-full book-shadow transform hover:rotate-1 transition-transform duration-500 relative`}>
+        
+        {/* Back Button */}
+        <button 
+            onClick={onBack}
+            className="absolute top-4 left-4 z-50 bg-white/20 hover:bg-white/40 text-white p-2 rounded-full backdrop-blur-sm transition-colors"
+        >
+            <ArrowLeft size={24} />
+        </button>
+
+        <div className={`bg-white rounded-r-2xl rounded-l-sm border-l-8 ${theme.border} p-8 md:p-12 flex flex-col items-center text-center h-full relative overflow-hidden min-h-[600px]`}>
             
             {/* Decorational Elements */}
             <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-200 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob"></div>
             <div className="absolute top-0 left-0 w-32 h-32 bg-blue-200 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob animation-delay-2000"></div>
             
-            <h1 className="text-4xl md:text-6xl font-black text-green-900 mb-2 relative z-10 tracking-tight">
-              The Monkey
-            </h1>
-            <span className="text-2xl font-bold text-green-600 mb-2 relative z-10">&</span>
-            <h1 className="text-4xl md:text-6xl font-black text-green-900 mb-8 relative z-10 tracking-tight">
-              The Crocodile
-            </h1>
-            
-            <div className="bg-green-100 p-6 rounded-full mb-8 relative z-10">
-                <span className="text-6xl filter drop-shadow-lg">🐒 🌳 🐊</span>
+            <div className="flex-1 flex flex-col items-center justify-center w-full z-10">
+                <h1 className={`text-4xl md:text-6xl font-black ${theme.text} mb-8 leading-tight tracking-tight`}>
+                {story.title}
+                </h1>
+                
+                <div className="bg-gray-100 p-8 rounded-full mb-10 shadow-inner">
+                    <span className="text-7xl filter drop-shadow-md transform hover:scale-110 transition-transform block">
+                        {story.icon}
+                    </span>
+                </div>
+
+                <p className="text-lg text-gray-500 mb-10 max-w-md font-medium">
+                  An interactive story generated just for you.
+                </p>
+
+                <button 
+                onClick={onStart}
+                className={`group relative ${theme.button} text-gray-900 text-2xl font-bold py-4 px-12 rounded-full shadow-[0_6px_0_rgba(0,0,0,0.1)] hover:shadow-[0_4px_0_rgba(0,0,0,0.1)] active:shadow-[0_0px_0_rgba(0,0,0,0.1)] active:translate-y-1 transition-all flex items-center gap-3`}
+                >
+                <Play className="fill-current" />
+                Start Reading
+                </button>
             </div>
 
-            <p className="text-lg text-gray-600 mb-10 max-w-md relative z-10">
-              A classic tale of friendship and cleverness, reimagined just for you!
-            </p>
-
-            <button 
-              onClick={onStart}
-              className="group relative z-10 bg-yellow-400 hover:bg-yellow-300 text-yellow-900 text-2xl font-bold py-4 px-12 rounded-full shadow-[0_6px_0_rgb(180,83,9)] hover:shadow-[0_4px_0_rgb(180,83,9)] active:shadow-[0_0px_0_rgb(180,83,9)] active:translate-y-1 transition-all flex items-center gap-3"
-            >
-              <Play className="fill-current" />
-              Start Reading
-            </button>
+            <div className="mt-auto pt-8 relative z-10">
+              <p className="text-sm font-medium text-gray-400 uppercase tracking-widest">
+                Generated by {story.author}
+              </p>
+            </div>
         </div>
       </div>
     </div>

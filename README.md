@@ -1,6 +1,4 @@
-
-
-# Panchatantra Tales
+# Panchatantra Tales - Kaggle Submission
 
 **Tagline:** Reimagining ancient wisdom with modern AI. An interactive, multimodal storybook for children.
 
@@ -41,25 +39,15 @@ We utilize the `@google/genai` SDK to power the core features:
 
 ## How to Run
 1.  Clone the repository.
-2. Run and deploy your AI Studio app
-
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/drive/1z7dO2wSDrkd80kVoMYW-axlE7sbDCQ1k
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-3.  Install dependencies:
+2.  Install dependencies:
     ```bash
     npm install
     ```
-4.  Set your API Key in the environment variables:
+3.  Set your API Key in the environment variables:
     ```bash
     export API_KEY=your_gemini_api_key
     ```
-5.  Run the development server:
+4.  Run the development server:
     ```bash
     npm start
     ```

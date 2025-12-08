@@ -6,6 +6,7 @@ export interface Story {
   color: string; // Tailwind color name (e.g., 'green', 'blue')
   author: string;
   lesson: string;
+  isCustom?: boolean;
   scenes: {
     narrative: string;
     imagePrompt: string;
@@ -24,8 +25,10 @@ export interface StoryScene {
 export type AppState = 'library' | 'intro' | 'generating_text' | 'reading' | 'finished' | 'error';
 
 export interface GeneratedStoryResponse {
+  title: string;
+  lesson: string;
   scenes: {
     narrative: string;
-    image_prompt: string;
+    imagePrompt: string;
   }[];
 }

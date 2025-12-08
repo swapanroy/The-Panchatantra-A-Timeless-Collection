@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI, Modality, Type } from "@google/genai";
 
 const getClient = () => {
   const apiKey = process.env.API_KEY;
@@ -63,6 +63,45 @@ export const generateSpeech = async (text: string): Promise<string> => {
   const audioBlob = base64PCMToWavBlob(base64Audio);
   return URL.createObjectURL(audioBlob);
 };
+
+export const generateCustomStory = async (mainChar: string, secondChar: string, setting: string): Promise<any> => {
+    const ai = getClient();
+    
+    const prompt = `Write a short children's story (Panchatantra style) about a ${mainChar} and a ${secondChar} in ${setting}. 
+    It must have a moral lesson suitable for 5-7 year olds.
+    Structure it into exactly 5 scenes.
+    Provide a creative title, a short lesson, and for each scene provide a narrative (simple English, 2 sentences max) and a visual image prompt (descriptive, for 3D animation style).`;
+  
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                  title: { type: Type.STRING },
+                  lesson: { type: Type.STRING },
+                  scenes: {
+                      type: Type.ARRAY,
+                      items: {
+                          type: Type.OBJECT,
+                          properties: {
+                              narrative: { type: Type.STRING },
+                              imagePrompt: { type: Type.STRING }
+                          }
+                      }
+                  }
+              }
+          }
+      }
+    });
+  
+    if (response.text) {
+        return JSON.parse(response.text);
+    }
+    throw new Error("Failed to generate story structure");
+  }
 
 // --- Audio Utilities ---
 

@@ -155,35 +155,5 @@ export const STORIES: Story[] = [
         imagePrompt: "Angry farmers running, chasing a donkey out of the gate, 3d animation style"
       }
     ]
-  },
-  {
-    id: 'mice-iron',
-    title: 'The Mice That Ate Iron',
-    icon: '⚖️',
-    color: 'red',
-    author: 'Swapan Roy',
-    lesson: "Honesty is always the best policy. Dishonesty leads to more problems.",
-    scenes: [
-      {
-        narrative: "A merchant left his heavy iron scale with a friend. When he came back, the friend lied, 'Mice ate your iron!'",
-        imagePrompt: "Two men talking in a room, one looking sneaky and lying, 3d animation style"
-      },
-      {
-        narrative: "The merchant stayed calm. He took the friend's son for a walk and hid him safely in a cave.",
-        imagePrompt: "Merchant walking with a young boy near a cave entrance, 3d animation style"
-      },
-      {
-        narrative: "'Where is my son?' asked the friend. 'A bird carried him away,' said the merchant. The friend was angry.",
-        imagePrompt: "Two men arguing outside, one looks very angry, 3d animation style"
-      },
-      {
-        narrative: "'Birds cannot carry boys!' shouted the friend. 'And mice cannot eat iron,' smiled the merchant.",
-        imagePrompt: "Merchant explaining calmly to the angry friend, 3d animation style"
-      },
-      {
-        narrative: "The friend said sorry. He gave back the iron scale, and the merchant brought back the boy.",
-        imagePrompt: "Two men shaking hands, boy standing happily next to them, 3d animation style"
-      }
-    ]
   }
 ];

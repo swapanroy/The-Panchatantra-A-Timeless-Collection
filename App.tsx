@@ -37,6 +37,7 @@ const App: React.FC = () => {
     setAppState('intro');
 
     // Trigger pre-fetching for the first few scenes immediately
+    // Using setTimeout to allow state to settle, but 0ms is fine
     setTimeout(() => {
         triggerImageGeneration(story.id, initialScenes, 0);
         triggerAudioGeneration(story.id, initialScenes, 0);
@@ -56,45 +57,55 @@ const App: React.FC = () => {
   ) => {
     const indicesToLoad = [index, index + 1].filter(i => i < currentScenes.length);
 
-    for (const idx of indicesToLoad) {
-        // Check state AND cache to avoid duplicate work
-        // If imageUrl is present (from cache hydration), we skip generation
-        if (!currentScenes[idx].imageUrl && !currentScenes[idx].isGeneratingImage) {
+    // Optimize: Run in parallel instead of sequential await
+    indicesToLoad.forEach(async (idx) => {
+        const scene = currentScenes[idx];
+        
+        // Skip if already has image or is currently generating
+        // Note: We check the passed 'currentScenes' snapshot. 
+        // In a high-frequency update scenario, we might want to check the functional state updater,
+        // but for this flow, the snapshot is sufficient to prevent double-triggering on mount.
+        if (scene.imageUrl || scene.isGeneratingImage) return;
+
+        // Double check cache before starting (synchronous check)
+        const cached = getCachedMedia(storyId, idx);
+        if (cached?.imageUrl) return;
+
+        // Set loading state
+        setScenes(prev => {
+            const newScenes = [...prev];
+            // Only update if still needed
+            if (!newScenes[idx].imageUrl && !newScenes[idx].isGeneratingImage) {
+                newScenes[idx] = { ...newScenes[idx], isGeneratingImage: true };
+                return newScenes;
+            }
+            return prev;
+        });
+
+        try {
+            const base64Image = await generateSceneImage(scene.imagePrompt);
             
+            // Save to Cache
+            saveCachedMedia(storyId, idx, { imageUrl: base64Image });
+
             setScenes(prev => {
                 const newScenes = [...prev];
-                if (!newScenes[idx].isGeneratingImage && !newScenes[idx].imageUrl) {
-                   newScenes[idx] = { ...newScenes[idx], isGeneratingImage: true };
-                   return newScenes;
-                }
-                return prev;
+                newScenes[idx] = { 
+                    ...newScenes[idx], 
+                    imageUrl: base64Image, 
+                    isGeneratingImage: false 
+                };
+                return newScenes;
             });
-
-            try {
-                const base64Image = await generateSceneImage(currentScenes[idx].imagePrompt);
-                
-                // Save to Cache
-                saveCachedMedia(storyId, idx, { imageUrl: base64Image });
-
-                setScenes(prev => {
-                    const newScenes = [...prev];
-                    newScenes[idx] = { 
-                        ...newScenes[idx], 
-                        imageUrl: base64Image, 
-                        isGeneratingImage: false 
-                    };
-                    return newScenes;
-                });
-            } catch (e) {
-                console.error(`Failed to generate image for scene ${idx}`, e);
-                setScenes(prev => {
-                    const newScenes = [...prev];
-                    newScenes[idx] = { ...newScenes[idx], isGeneratingImage: false }; 
-                    return newScenes;
-                });
-            }
+        } catch (e) {
+            console.error(`Failed to generate image for scene ${idx}`, e);
+            setScenes(prev => {
+                const newScenes = [...prev];
+                newScenes[idx] = { ...newScenes[idx], isGeneratingImage: false }; 
+                return newScenes;
+            });
         }
-    }
+    });
   }, []);
 
   const triggerAudioGeneration = useCallback(async (
@@ -104,52 +115,56 @@ const App: React.FC = () => {
   ) => {
     const indicesToLoad = [index, index + 1].filter(i => i < currentScenes.length);
 
-    for (const idx of indicesToLoad) {
-        // Check state AND cache
-        if (!currentScenes[idx].audioUrl && !currentScenes[idx].isGeneratingAudio) {
+    // Optimize: Run in parallel
+    indicesToLoad.forEach(async (idx) => {
+        const scene = currentScenes[idx];
+
+        if (scene.audioUrl || scene.isGeneratingAudio) return;
+
+        const cached = getCachedMedia(storyId, idx);
+        if (cached?.audioUrl) return;
+
+        setScenes(prev => {
+            const newScenes = [...prev];
+            if (!newScenes[idx].audioUrl && !newScenes[idx].isGeneratingAudio) {
+                newScenes[idx] = { ...newScenes[idx], isGeneratingAudio: true };
+                return newScenes;
+            }
+            return prev;
+        });
+
+        try {
+            const textToSpeak = scene.narrative;
+            const audioBlobUrl = await generateSpeech(textToSpeak);
             
+            // Save to Cache
+            saveCachedMedia(storyId, idx, { audioUrl: audioBlobUrl });
+
             setScenes(prev => {
                 const newScenes = [...prev];
-                if (!newScenes[idx].isGeneratingAudio && !newScenes[idx].audioUrl) {
-                    newScenes[idx] = { ...newScenes[idx], isGeneratingAudio: true };
-                    return newScenes;
-                }
-                return prev;
+                newScenes[idx] = { 
+                    ...newScenes[idx], 
+                    audioUrl: audioBlobUrl, 
+                    isGeneratingAudio: false 
+                };
+                return newScenes;
             });
-
-            try {
-                const textToSpeak = currentScenes[idx].narrative;
-                const audioBlobUrl = await generateSpeech(textToSpeak);
-                
-                // Save to Cache
-                saveCachedMedia(storyId, idx, { audioUrl: audioBlobUrl });
-
-                setScenes(prev => {
-                    const newScenes = [...prev];
-                    newScenes[idx] = { 
-                        ...newScenes[idx], 
-                        audioUrl: audioBlobUrl, 
-                        isGeneratingAudio: false 
-                    };
-                    return newScenes;
-                });
-            } catch (e) {
-                console.error(`Failed to generate audio for scene ${idx}`, e);
-                setScenes(prev => {
-                    const newScenes = [...prev];
-                    newScenes[idx] = { ...newScenes[idx], isGeneratingAudio: false };
-                    return newScenes;
-                });
-            }
+        } catch (e) {
+            console.error(`Failed to generate audio for scene ${idx}`, e);
+            setScenes(prev => {
+                const newScenes = [...prev];
+                newScenes[idx] = { ...newScenes[idx], isGeneratingAudio: false };
+                return newScenes;
+            });
         }
-    }
+    });
   }, []);
 
   const handleNext = () => {
     if (currentSceneIndex < scenes.length - 1 && selectedStory) {
       const nextIndex = currentSceneIndex + 1;
       setCurrentSceneIndex(nextIndex);
-      // Pass the story ID to the trigger functions
+      // Trigger generation for the new current scene (if missing) and the one after it
       triggerImageGeneration(selectedStory.id, scenes, nextIndex);
       triggerAudioGeneration(selectedStory.id, scenes, nextIndex);
     } else {

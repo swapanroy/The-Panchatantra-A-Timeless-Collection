@@ -69,7 +69,7 @@ To respect browser storage quotas (~5MB):
     ```bash
     npm start
     ```
-
+5. Direct link: https://aistudio.google.com/apps/drive/1z7dO2wSDrkd80kVoMYW-axlE7sbDCQ1k?showAssistant=true&resourceKey=&showPreview=true
 ## Future Roadmap
 - **Voice Input**: Allow kids to dictate their story ideas instead of typing.
 - **Multi-language Support**: Translate stories and audio into Hindi, Spanish, and French on the fly.

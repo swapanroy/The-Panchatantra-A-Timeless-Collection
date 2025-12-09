@@ -1,4 +1,4 @@
-# Panchatantra Tales - Kaggle Submission
+# Panchatantra Tales 
 
 **Tagline:** Reimagining ancient wisdom with modern AI. An infinite, interactive storybook engine for children.
 

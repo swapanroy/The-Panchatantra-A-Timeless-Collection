@@ -47,10 +47,14 @@ export const generateSceneImage = async (prompt: string): Promise<string> => {
   return retryWithBackoff(
     async () => {
       const ai = getClient();
+      
+      // Inject style modifiers for consistent, high-quality results
+      const styledPrompt = `${prompt}, vibrant 3d animation style, pixar style, disney style, cute, soft lighting, 8k resolution, high detail, masterpiece`;
+
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash-image",
         contents: {
-          parts: [{ text: prompt }],
+          parts: [{ text: styledPrompt }],
         },
         config: {
           imageConfig: {
@@ -137,7 +141,9 @@ export const generateCustomStory = async (
       const prompt = `Write a short children's story (Panchatantra style) about a ${mainChar} and a ${secondChar} in ${setting}. 
     It must have a moral lesson suitable for 5-7 year olds.
     Structure it into exactly 5 scenes.
-    Provide a creative title, a short lesson, and for each scene provide a narrative (simple English, 2 sentences max) and a visual image prompt (descriptive, for 3D animation style).`;
+    Provide a creative title, a short lesson, and for each scene provide:
+    1. narrative: simple English, 2 sentences max.
+    2. imagePrompt: visually descriptive, specifying character emotions, cute 3d animation style, consistent appearance.`;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",

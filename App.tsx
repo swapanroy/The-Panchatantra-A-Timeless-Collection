@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { generateSceneImage, generateSpeech, generateCustomStory } from './services/geminiService';
 import { getCachedMedia, saveCachedMedia } from './services/mediaCache';
 import { getSavedStories, saveStoryToStorage, deleteStoryFromStorage, saveAllStories, getHiddenDefaultStories, hideDefaultStory } from './services/storageService';
@@ -30,17 +30,39 @@ const App: React.FC = () => {
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [hasSavedCurrentStory, setHasSavedCurrentStory] = useState(false);
 
-  // Load saved stories and hidden defaults on mount
+  // Admin Mode
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Request Management
+  const timeoutsRef = useRef<number[]>([]);
+
+  const clearAllTimeouts = () => {
+      timeoutsRef.current.forEach(window.clearTimeout);
+      timeoutsRef.current = [];
+  };
+
+  // Load saved stories, hidden defaults, and admin status on mount
   useEffect(() => {
       setSavedStories(getSavedStories());
       setHiddenStoryIds(getHiddenDefaultStories());
+      
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('admin') === 'true') {
+          setIsAdmin(true);
+      }
+      
+      // Cleanup on unmount
+      return () => clearAllTimeouts();
   }, []);
 
   const handleSelectStory = (story: Story) => {
+    // Clear any pending requests from previous interactions to free up bandwidth/quota
+    clearAllTimeouts();
+
     setSelectedStory(story);
     setHasSavedCurrentStory(!!story.isCustom && savedStories.some(s => s.id === story.id));
     
-    // Initialize scenes with cached data if available
+    // Initialize scenes with cached data if available (Instant Load)
     const initialScenes: StoryScene[] = story.scenes.map((s, index) => {
         const cached = getCachedMedia(story.id, index);
         return {
@@ -56,11 +78,10 @@ const App: React.FC = () => {
     setScenes(initialScenes);
     setAppState('intro');
 
-    // Trigger pre-fetching for the first few scenes immediately
-    setTimeout(() => {
-        triggerImageGeneration(story.id, initialScenes, 0);
-        triggerAudioGeneration(story.id, initialScenes, 0);
-    }, 0);
+    // Trigger immediate generation for the first scene (Scene 0)
+    // We delay Scene 1 slightly to prioritize Scene 0's assets
+    triggerImageGeneration(story.id, initialScenes, 0);
+    triggerAudioGeneration(story.id, initialScenes, 0);
   };
 
   const handleCreateStory = async (mainChar: string, secondChar: string, setting: string) => {
@@ -86,7 +107,8 @@ const App: React.FC = () => {
       } catch (err) {
           console.error("Failed to create story", err);
           setIsGeneratingStory(false);
-          // Optional: Show error toast
+          setError("Couldn't create story. Please try again!");
+          setAppState('error');
       }
   };
 
@@ -124,40 +146,36 @@ const App: React.FC = () => {
     setCurrentSceneIndex(0);
   };
 
-  const triggerImageGeneration = useCallback(async (
+  const triggerImageGeneration = useCallback((
     storyId: string,
     currentScenes: StoryScene[], 
     startIndex: number
   ) => {
+    // Only load current and next
     const indicesToLoad = [startIndex, startIndex + 1].filter(i => i < currentScenes.length);
 
-    // Stagger requests to avoid 429 Rate Limits
     const loadSceneImage = async (idx: number) => {
-        const scene = currentScenes[idx];
+        // Synchronous check: Do we already have it or is it working?
+        let needsLoading = false;
         
-        // Skip if already has image or is currently generating
-        // Note: we re-check 'isGeneratingImage' from state in case another trigger started it
-        setScenes(prev => {
-            if (prev[idx].imageUrl || prev[idx].isGeneratingImage) return prev;
-            return prev; // Just for check
-        });
-
-        // Check cache
+        // 1. Check Cache
         const cached = getCachedMedia(storyId, idx);
         if (cached?.imageUrl) {
-            setScenes(prev => {
+             setScenes(prev => {
                 const newScenes = [...prev];
-                newScenes[idx] = { ...newScenes[idx], imageUrl: cached.imageUrl };
+                // Only update if not already set
+                if (!newScenes[idx].imageUrl) {
+                    newScenes[idx] = { ...newScenes[idx], imageUrl: cached.imageUrl };
+                }
                 return newScenes;
             });
             return;
         }
 
-        // Check if already started (double check against recent state update)
-        let shouldStart = false;
+        // 2. Check State & Mark as Generating
         setScenes(prev => {
              if (!prev[idx].imageUrl && !prev[idx].isGeneratingImage) {
-                 shouldStart = true;
+                 needsLoading = true;
                  const newScenes = [...prev];
                  newScenes[idx] = { ...newScenes[idx], isGeneratingImage: true };
                  return newScenes;
@@ -165,10 +183,10 @@ const App: React.FC = () => {
              return prev;
         });
 
-        if (!shouldStart) return;
+        if (!needsLoading) return;
 
         try {
-            const base64Image = await generateSceneImage(scene.imagePrompt);
+            const base64Image = await generateSceneImage(currentScenes[idx].imagePrompt);
             saveCachedMedia(storyId, idx, { imageUrl: base64Image });
             setScenes(prev => {
                 const newScenes = [...prev];
@@ -189,18 +207,23 @@ const App: React.FC = () => {
         }
     };
 
-    // Load current scene immediately
-    await loadSceneImage(startIndex);
+    // --- Scheduling Logic ---
+    
+    // 1. Load Current Scene Immediately
+    loadSceneImage(startIndex);
 
-    // Load next scene with a delay to respect rate limits
+    // 2. Schedule Next Scene (Staggered to prevent 429 Rate Limits)
     if (indicesToLoad.length > 1) {
-        setTimeout(() => {
-            loadSceneImage(indicesToLoad[1]);
-        }, 2500); // 2.5s delay
+        const nextIndex = indicesToLoad[1];
+        // Increased delay to 3500ms to further reduce 429 errors
+        const timerId = window.setTimeout(() => {
+            loadSceneImage(nextIndex);
+        }, 3500);
+        timeoutsRef.current.push(timerId);
     }
   }, []);
 
-  const triggerAudioGeneration = useCallback(async (
+  const triggerAudioGeneration = useCallback((
     storyId: string,
     currentScenes: StoryScene[], 
     startIndex: number
@@ -208,23 +231,25 @@ const App: React.FC = () => {
     const indicesToLoad = [startIndex, startIndex + 1].filter(i => i < currentScenes.length);
 
     const loadSceneAudio = async (idx: number) => {
-        const scene = currentScenes[idx];
+        let needsLoading = false;
 
-        // Check cache
+        // 1. Check Cache
         const cached = getCachedMedia(storyId, idx);
         if (cached?.audioUrl) {
              setScenes(prev => {
                 const newScenes = [...prev];
-                newScenes[idx] = { ...newScenes[idx], audioUrl: cached.audioUrl };
+                if (!newScenes[idx].audioUrl) {
+                     newScenes[idx] = { ...newScenes[idx], audioUrl: cached.audioUrl };
+                }
                 return newScenes;
             });
             return;
         }
 
-        let shouldStart = false;
+        // 2. Check State
         setScenes(prev => {
              if (!prev[idx].audioUrl && !prev[idx].isGeneratingAudio) {
-                 shouldStart = true;
+                 needsLoading = true;
                  const newScenes = [...prev];
                  newScenes[idx] = { ...newScenes[idx], isGeneratingAudio: true };
                  return newScenes;
@@ -232,10 +257,10 @@ const App: React.FC = () => {
              return prev;
         });
 
-        if (!shouldStart) return;
+        if (!needsLoading) return;
 
         try {
-            const textToSpeak = scene.narrative;
+            const textToSpeak = currentScenes[idx].narrative;
             const audioBlobUrl = await generateSpeech(textToSpeak);
             saveCachedMedia(storyId, idx, { audioUrl: audioBlobUrl });
             setScenes(prev => {
@@ -257,14 +282,19 @@ const App: React.FC = () => {
         }
     };
 
-    // Load current immediately
-    await loadSceneAudio(startIndex);
+    // --- Scheduling Logic ---
 
-    // Load next with delay
+    // 1. Load Current Audio Immediately (Audio is fast/light)
+    loadSceneAudio(startIndex);
+
+    // 2. Schedule Next Audio
     if (indicesToLoad.length > 1) {
-        setTimeout(() => {
-            loadSceneAudio(indicesToLoad[1]);
-        }, 2500); // 2.5s delay
+        const nextIndex = indicesToLoad[1];
+        // Increased delay to 3500ms to ensure better reliability
+        const timerId = window.setTimeout(() => {
+            loadSceneAudio(nextIndex);
+        }, 3500);
+        timeoutsRef.current.push(timerId);
     }
   }, []);
 
@@ -272,6 +302,7 @@ const App: React.FC = () => {
     if (currentSceneIndex < scenes.length - 1 && selectedStory) {
       const nextIndex = currentSceneIndex + 1;
       setCurrentSceneIndex(nextIndex);
+      // Trigger background loading for next+1
       triggerImageGeneration(selectedStory.id, scenes, nextIndex);
       triggerAudioGeneration(selectedStory.id, scenes, nextIndex);
     } else {
@@ -286,6 +317,7 @@ const App: React.FC = () => {
   };
 
   const handleReturnToLibrary = () => {
+    clearAllTimeouts(); // Stop all background loading
     setAppState('library');
     setScenes([]);
     setCurrentSceneIndex(0);
@@ -307,6 +339,7 @@ const App: React.FC = () => {
                     onDeleteStory={handleDeleteStory}
                     onReorderStories={handleReorderStories}
                     onOpenAudit={() => setIsAuditModalOpen(true)}
+                    isAdmin={isAdmin}
                 />
                 <CreateStoryModal 
                     isOpen={isCreateModalOpen}
@@ -325,12 +358,12 @@ const App: React.FC = () => {
             <BookCover 
                 story={selectedStory}
                 onStart={startStory} 
-                onBack={() => setAppState('library')}
+                onBack={handleReturnToLibrary}
             />
         )}
 
         {appState === 'error' && (
-            <ErrorDisplay message={error || 'Unknown error'} onRetry={() => setAppState('intro')} />
+            <ErrorDisplay message={error || 'Unknown error'} onRetry={handleReturnToLibrary} />
         )}
 
         {appState === 'reading' && (

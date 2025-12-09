@@ -3,10 +3,10 @@
 **Tagline:** Reimagining ancient wisdom with modern AI. An infinite, interactive storybook engine for children.
 
 ## The Challenge
-In a digital age, children often consume passive content that lacks educational value. Traditional moral stories, like the Panchatantra, are timeless but can feel outdated to modern kids. Furthermore, static books offer a finite experience—once read, the engagement ends. We wanted to bridge this gap by creating an app that offers **infinite**, personalized moral education.
+In a digital age, children often consume passive content that lacks educational value. Traditional moral stories, like the Panchatantra, are timeless but can feel outdated to modern kids. Furthermore, static books offer a finite experience—once read, the engagement ends. I wanted to bridge this gap by creating an app that offers **infinite**, personalized moral education.
 
 ## The Solution
-**Panchatantra Tales** is a web application that brings classic fables to life—and lets kids create new ones—using Google's Gemini API. It transforms text into a rich, read-along experience with:
+**Panchatantra Tales** is a web application that brings classic fables to life—and lets kids create new ones—using Google's Gemini. It transforms text into a rich, read-along experience with:
 - **AI-Generated Illustrations**: Visualizing scenes in real-time.
 - **Narrative Text-to-Speech**: Soothing voiceovers for accessibility and engagement.
 - **Infinite Story Engine**: A tool to generate brand new fables based on user-selected characters.

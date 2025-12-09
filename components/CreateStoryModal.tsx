@@ -51,7 +51,7 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({ isOpen, onCl
               placeholder="e.g., A brave little Pig"
               value={mainChar}
               onChange={(e) => setMainChar(e.target.value)}
-              className="w-full bg-gray-50 border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all font-medium text-lg"
+              className="w-full bg-gray-50 border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-900 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all font-medium text-lg placeholder-gray-400"
               disabled={isLoading}
               required
             />
@@ -64,7 +64,7 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({ isOpen, onCl
               placeholder="e.g., A wise old Owl"
               value={secondChar}
               onChange={(e) => setSecondChar(e.target.value)}
-              className="w-full bg-gray-50 border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all font-medium text-lg"
+              className="w-full bg-gray-50 border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-900 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all font-medium text-lg placeholder-gray-400"
               disabled={isLoading}
               required
             />
@@ -77,7 +77,7 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({ isOpen, onCl
               placeholder="e.g., In a magical candy forest"
               value={setting}
               onChange={(e) => setSetting(e.target.value)}
-              className="w-full bg-gray-50 border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all font-medium text-lg"
+              className="w-full bg-gray-50 border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-900 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all font-medium text-lg placeholder-gray-400"
               disabled={isLoading}
               required
             />

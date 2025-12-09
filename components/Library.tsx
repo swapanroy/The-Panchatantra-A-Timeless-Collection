@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Story } from '../types';
-import { Star, Book, Plus, Trash2, ArrowLeft, ArrowRight, Settings2, BookOpen, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Star, Book, Plus, Trash2, ArrowLeft, ArrowRight, Settings2, BookOpen, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
 
 interface LibraryProps {
   savedStories: Story[];
@@ -10,6 +10,7 @@ interface LibraryProps {
   onCreateStory: () => void;
   onDeleteStory: (id: string) => void;
   onReorderStories: (stories: Story[]) => void;
+  onOpenAudit: () => void;
 }
 
 const colorVariants: Record<string, string> = {
@@ -32,27 +33,18 @@ const iconBgVariants: Record<string, string> = {
 
 type Tab = 'read' | 'manage';
 
-export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, onSelectStory, onCreateStory, onDeleteStory, onReorderStories }) => {
-  const [activeTab, setActiveTab] = useState<Tab>('read');
+interface StoryCardProps {
+    story: Story;
+    onSelect: (story: Story) => void;
+}
 
-  const handleMove = (index: number, direction: 'left' | 'right') => {
-    const newStories = [...savedStories];
-    const targetIndex = direction === 'left' ? index - 1 : index + 1;
-    
-    if (targetIndex >= 0 && targetIndex < newStories.length) {
-        // Swap
-        [newStories[index], newStories[targetIndex]] = [newStories[targetIndex], newStories[index]];
-        onReorderStories(newStories);
-    }
-  };
-  
-  const StoryCard = ({ story }: { story: Story }) => {
+const StoryCard: React.FC<StoryCardProps> = ({ story, onSelect }) => {
     const cardClass = colorVariants[story.color] || colorVariants.green;
     const iconClass = iconBgVariants[story.color] || iconBgVariants.green;
 
     return (
         <button
-        onClick={() => onSelectStory(story)}
+        onClick={() => onSelect(story)}
         className={`
             group relative p-6 rounded-3xl border-b-8 transition-all duration-300
             transform hover:-translate-y-2 hover:shadow-xl text-left flex flex-col h-full w-full
@@ -83,11 +75,19 @@ export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, 
         </p>
         </button>
     );
-  };
+};
 
-  const ManageCard = ({ story, index, isCustom }: { story: Story, index: number, isCustom: boolean }) => {
-    const isFirst = index === 0;
-    const isLast = index === savedStories.length - 1;
+interface ManageCardProps {
+    story: Story;
+    index: number;
+    isCustom: boolean;
+    isFirst: boolean;
+    isLast: boolean;
+    onDelete: (id: string) => void;
+    onMove: (index: number, direction: 'left' | 'right') => void;
+}
+
+const ManageCard: React.FC<ManageCardProps> = ({ story, index, isCustom, isFirst, isLast, onDelete, onMove }) => {
     const [deleteStep, setDeleteStep] = useState(0); // 0: Idle, 1: Warning 1, 2: Warning 2
 
     const handleDelete = () => {
@@ -96,7 +96,7 @@ export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, 
         } else if (deleteStep === 1) {
             setDeleteStep(2);
         } else {
-            onDeleteStory(story.id);
+            onDelete(story.id);
         }
     };
 
@@ -120,7 +120,7 @@ export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, 
                 {isCustom && deleteStep === 0 && (
                     <>
                         <button 
-                            onClick={() => handleMove(index, 'left')}
+                            onClick={() => onMove(index, 'left')}
                             disabled={isFirst}
                             className={`p-3 rounded-xl border-2 font-bold transition-all ${isFirst ? 'bg-gray-50 border-gray-100 text-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-600'}`}
                             title="Move Up/Left"
@@ -130,7 +130,7 @@ export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, 
                         </button>
 
                         <button 
-                            onClick={() => handleMove(index, 'right')}
+                            onClick={() => onMove(index, 'right')}
                             disabled={isLast}
                             className={`p-3 rounded-xl border-2 font-bold transition-all ${isLast ? 'bg-gray-50 border-gray-100 text-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-600'}`}
                             title="Move Down/Right"
@@ -186,8 +186,22 @@ export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, 
             </div>
         </div>
     );
-  };
+};
 
+export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, onSelectStory, onCreateStory, onDeleteStory, onReorderStories, onOpenAudit }) => {
+  const [activeTab, setActiveTab] = useState<Tab>('read');
+
+  const handleMove = (index: number, direction: 'left' | 'right') => {
+    const newStories = [...savedStories];
+    const targetIndex = direction === 'left' ? index - 1 : index + 1;
+    
+    if (targetIndex >= 0 && targetIndex < newStories.length) {
+        // Swap
+        [newStories[index], newStories[targetIndex]] = [newStories[targetIndex], newStories[index]];
+        onReorderStories(newStories);
+    }
+  };
+  
   return (
     <div className="min-h-screen bg-[#f8fafc] p-6 md:p-10 font-['Fredoka']">
       <div className="max-w-6xl mx-auto">
@@ -250,10 +264,14 @@ export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, 
                 </button>
                 
                 {/* Custom Stories (Reversed for Newest First) */}
-                {[...savedStories].reverse().map(story => <StoryCard key={story.id} story={story} />)}
+                {[...savedStories].reverse().map(story => (
+                    <StoryCard key={story.id} story={story} onSelect={onSelectStory} />
+                ))}
 
                 {/* Default Stories */}
-                {defaultStories.map((story) => <StoryCard key={story.id} story={story} />)}
+                {defaultStories.map((story) => (
+                    <StoryCard key={story.id} story={story} onSelect={onSelectStory} />
+                ))}
                 </div>
             </div>
         )}
@@ -261,9 +279,20 @@ export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, 
         {/* MANAGE TAB */}
         {activeTab === 'manage' && (
             <div className="animate-fadeIn max-w-3xl mx-auto space-y-12">
-                 <div className="bg-purple-50 border border-purple-100 rounded-3xl p-8 text-center">
-                    <h2 className="text-2xl font-black text-purple-900 mb-2">Manage Your Library</h2>
-                    <p className="text-purple-700/70 font-medium">Reorder or delete your stories.</p>
+                 <div className="bg-purple-50 border border-purple-100 rounded-3xl p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div className="text-center md:text-left">
+                        <h2 className="text-2xl font-black text-purple-900 mb-2">Manage Your Library</h2>
+                        <p className="text-purple-700/70 font-medium">Reorder, delete stories, or view usage logs.</p>
+                    </div>
+                    
+                    {/* AUDIT LOG BUTTON */}
+                    <button 
+                        onClick={onOpenAudit}
+                        className="bg-white hover:bg-purple-100 text-purple-700 border-2 border-purple-200 font-bold py-3 px-6 rounded-xl flex items-center gap-2 transition-all shadow-sm hover:shadow-md"
+                    >
+                        <Activity size={20} />
+                        View Audit Logs
+                    </button>
                  </div>
 
                  {/* Custom Stories Section */}
@@ -279,7 +308,16 @@ export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, 
                     ) : (
                         <div className="space-y-4">
                             {savedStories.map((story, index) => (
-                                <ManageCard key={story.id} story={story} index={index} isCustom={true} />
+                                <ManageCard 
+                                    key={story.id} 
+                                    story={story} 
+                                    index={index} 
+                                    isCustom={true} 
+                                    isFirst={index === 0}
+                                    isLast={index === savedStories.length - 1}
+                                    onDelete={onDeleteStory}
+                                    onMove={handleMove}
+                                />
                             ))}
                         </div>
                     )}
@@ -298,7 +336,16 @@ export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, 
                     ) : (
                         <div className="space-y-4">
                             {defaultStories.map((story, index) => (
-                                <ManageCard key={story.id} story={story} index={index} isCustom={false} />
+                                <ManageCard 
+                                    key={story.id} 
+                                    story={story} 
+                                    index={index} 
+                                    isCustom={false} 
+                                    isFirst={false}
+                                    isLast={false}
+                                    onDelete={onDeleteStory}
+                                    onMove={handleMove}
+                                />
                             ))}
                         </div>
                     )}

@@ -1,5 +1,6 @@
 
 import { GoogleGenAI, Modality, Type } from "@google/genai";
+import { logTransaction } from "./auditService";
 
 const getClient = () => {
   const apiKey = process.env.API_KEY;
@@ -9,111 +10,192 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-export const generateSceneImage = async (prompt: string): Promise<string> => {
-  const ai = getClient();
-  
-  // Using gemini-2.5-flash-image for generation
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-image', 
-    contents: {
-      parts: [{ text: prompt }]
-    },
-    config: {
-      imageConfig: {
-        aspectRatio: "1:1", // Square for storybook feel
-      }
-    }
-  });
+// --- Utilities ---
 
-  // Iterate to find the image part
-  if (response.candidates && response.candidates[0].content.parts) {
-    for (const part of response.candidates[0].content.parts) {
-      if (part.inlineData && part.inlineData.data) {
-        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-      }
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const retryWithBackoff = async <T>(
+  operation: () => Promise<T>,
+  retries = 3,
+  delay = 2000,
+  operationName = "API Call"
+): Promise<T> => {
+  try {
+    return await operation();
+  } catch (error: any) {
+    const isRateLimit =
+      error?.status === 429 ||
+      error?.code === 429 ||
+      error?.message?.includes("429") ||
+      error?.message?.includes("quota") ||
+      error?.message?.includes("RESOURCE_EXHAUSTED");
+
+    if (retries > 0 && isRateLimit) {
+      console.warn(
+        `[${operationName}] Rate limit hit. Retrying in ${delay}ms... (${retries} retries left)`
+      );
+      await wait(delay);
+      return retryWithBackoff(operation, retries - 1, delay * 2, operationName);
     }
+    throw error;
   }
+};
 
-  throw new Error("No image generated");
+// --- API Functions ---
+
+export const generateSceneImage = async (prompt: string): Promise<string> => {
+  return retryWithBackoff(
+    async () => {
+      const ai = getClient();
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-image",
+        contents: {
+          parts: [{ text: prompt }],
+        },
+        config: {
+          imageConfig: {
+            aspectRatio: "1:1",
+          },
+        },
+      });
+
+      // Log Audit
+      logTransaction(
+        "Image",
+        `Scene Illustration: ${prompt.substring(0, 30)}...`,
+        response.usageMetadata
+      );
+
+      // Iterate to find the image part
+      if (response.candidates && response.candidates[0].content.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData && part.inlineData.data) {
+            return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+          }
+        }
+      }
+
+      throw new Error("No image data found in response");
+    },
+    3,
+    2000,
+    "generateSceneImage"
+  );
 };
 
 export const generateSpeech = async (text: string): Promise<string> => {
-  const ai = getClient();
+  return retryWithBackoff(
+    async () => {
+      const ai = getClient();
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-preview-tts",
-    contents: { parts: [{ text: text }] },
-    config: {
-      responseModalities: [Modality.AUDIO],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: 'Kore' }, // Soothing female voice
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: { parts: [{ text: text }] },
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: "Kore" },
+            },
+          },
         },
-      },
+      });
+
+      // Log Audit
+      logTransaction(
+        "Audio",
+        `Narration: ${text.substring(0, 30)}...`,
+        response.usageMetadata
+      );
+
+      const base64Audio =
+        response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+
+      if (!base64Audio) {
+        throw new Error("No audio generated");
+      }
+
+      // Convert Base64 PCM to WAV Blob URL
+      const audioBlob = base64PCMToWavBlob(base64Audio);
+      return URL.createObjectURL(audioBlob);
     },
-  });
-
-  const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  
-  if (!base64Audio) {
-    throw new Error("No audio generated");
-  }
-
-  // Convert Base64 PCM to WAV Blob URL
-  const audioBlob = base64PCMToWavBlob(base64Audio);
-  return URL.createObjectURL(audioBlob);
+    3,
+    2000,
+    "generateSpeech"
+  );
 };
 
-export const generateCustomStory = async (mainChar: string, secondChar: string, setting: string): Promise<any> => {
-    const ai = getClient();
-    
-    const prompt = `Write a short children's story (Panchatantra style) about a ${mainChar} and a ${secondChar} in ${setting}. 
+export const generateCustomStory = async (
+  mainChar: string,
+  secondChar: string,
+  setting: string
+): Promise<any> => {
+  return retryWithBackoff(
+    async () => {
+      const ai = getClient();
+
+      const prompt = `Write a short children's story (Panchatantra style) about a ${mainChar} and a ${secondChar} in ${setting}. 
     It must have a moral lesson suitable for 5-7 year olds.
     Structure it into exactly 5 scenes.
     Provide a creative title, a short lesson, and for each scene provide a narrative (simple English, 2 sentences max) and a visual image prompt (descriptive, for 3D animation style).`;
-  
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
           responseMimeType: "application/json",
           responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                  title: { type: Type.STRING },
-                  lesson: { type: Type.STRING },
-                  scenes: {
-                      type: Type.ARRAY,
-                      items: {
-                          type: Type.OBJECT,
-                          properties: {
-                              narrative: { type: Type.STRING },
-                              imagePrompt: { type: Type.STRING }
-                          }
-                      }
-                  }
-              }
-          }
-      }
-    });
-  
-    if (response.text) {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              lesson: { type: Type.STRING },
+              scenes: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    narrative: { type: Type.STRING },
+                    imagePrompt: { type: Type.STRING },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // Log Audit
+      logTransaction(
+        "Story",
+        `New Story: ${mainChar} & ${secondChar}`,
+        response.usageMetadata
+      );
+
+      if (response.text) {
         return JSON.parse(response.text);
-    }
-    throw new Error("Failed to generate story structure");
-  }
+      }
+      throw new Error("Failed to generate story structure");
+    },
+    2,
+    3000,
+    "generateCustomStory"
+  );
+};
 
 // --- Audio Utilities ---
 
 // Helper to convert Base64 raw PCM to a WAV Blob
-const base64PCMToWavBlob = (base64PCM: string, sampleRate: number = 24000): Blob => {
+const base64PCMToWavBlob = (
+  base64PCM: string,
+  sampleRate: number = 24000
+): Blob => {
   const binaryString = atob(base64PCM);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
     bytes[i] = binaryString.charCodeAt(i);
   }
-  
+
   return pcmToWav(bytes, sampleRate);
 };
 
@@ -128,12 +210,12 @@ const pcmToWav = (pcmData: Uint8Array, sampleRate: number): Blob => {
   const view = new DataView(buffer);
 
   // RIFF chunk
-  writeString(view, 0, 'RIFF');
+  writeString(view, 0, "RIFF");
   view.setUint32(4, 36 + dataSize, true);
-  writeString(view, 8, 'WAVE');
-  
+  writeString(view, 8, "WAVE");
+
   // fmt chunk
-  writeString(view, 12, 'fmt ');
+  writeString(view, 12, "fmt ");
   view.setUint32(16, 16, true); // Subchunk1Size
   view.setUint16(20, 1, true); // AudioFormat (PCM)
   view.setUint16(22, numChannels, true);
@@ -143,14 +225,14 @@ const pcmToWav = (pcmData: Uint8Array, sampleRate: number): Blob => {
   view.setUint16(34, bitsPerSample, true);
 
   // data chunk
-  writeString(view, 36, 'data');
+  writeString(view, 36, "data");
   view.setUint32(40, dataSize, true);
 
   // Write PCM data
   const pcmBytes = new Uint8Array(buffer, 44);
   pcmBytes.set(pcmData);
 
-  return new Blob([buffer], { type: 'audio/wav' });
+  return new Blob([buffer], { type: "audio/wav" });
 };
 
 const writeString = (view: DataView, offset: number, string: string) => {

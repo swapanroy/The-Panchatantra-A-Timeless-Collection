@@ -32,3 +32,13 @@ export interface GeneratedStoryResponse {
     imagePrompt: string;
   }[];
 }
+
+export interface AuditLog {
+  id: string;
+  timestamp: number;
+  type: 'Story' | 'Image' | 'Audio';
+  detail: string;
+  promptTokens: number;
+  responseTokens: number;
+  totalTokens: number;
+}

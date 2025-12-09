@@ -10,6 +10,7 @@ import { SceneViewer } from './components/SceneViewer';
 import { Library } from './components/Library';
 import { CreateStoryModal } from './components/CreateStoryModal';
 import { UpgradeModal } from './components/UpgradeModal';
+import { AuditModal } from './components/AuditModal';
 import { ErrorDisplay } from './components/UI';
 import { Home, Lightbulb, Save, Check } from 'lucide-react';
 
@@ -26,6 +27,7 @@ const App: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isGeneratingStory, setIsGeneratingStory] = useState(false);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [hasSavedCurrentStory, setHasSavedCurrentStory] = useState(false);
 
   // Load saved stories and hidden defaults on mount
@@ -125,27 +127,45 @@ const App: React.FC = () => {
   const triggerImageGeneration = useCallback(async (
     storyId: string,
     currentScenes: StoryScene[], 
-    index: number
+    startIndex: number
   ) => {
-    const indicesToLoad = [index, index + 1].filter(i => i < currentScenes.length);
+    const indicesToLoad = [startIndex, startIndex + 1].filter(i => i < currentScenes.length);
 
-    // Optimize: Run in parallel instead of sequential await
-    indicesToLoad.forEach(async (idx) => {
+    // Stagger requests to avoid 429 Rate Limits
+    const loadSceneImage = async (idx: number) => {
         const scene = currentScenes[idx];
         
-        if (scene.imageUrl || scene.isGeneratingImage) return;
-
-        const cached = getCachedMedia(storyId, idx);
-        if (cached?.imageUrl) return;
-
+        // Skip if already has image or is currently generating
+        // Note: we re-check 'isGeneratingImage' from state in case another trigger started it
         setScenes(prev => {
-            const newScenes = [...prev];
-            if (!newScenes[idx].imageUrl && !newScenes[idx].isGeneratingImage) {
-                newScenes[idx] = { ...newScenes[idx], isGeneratingImage: true };
-                return newScenes;
-            }
-            return prev;
+            if (prev[idx].imageUrl || prev[idx].isGeneratingImage) return prev;
+            return prev; // Just for check
         });
+
+        // Check cache
+        const cached = getCachedMedia(storyId, idx);
+        if (cached?.imageUrl) {
+            setScenes(prev => {
+                const newScenes = [...prev];
+                newScenes[idx] = { ...newScenes[idx], imageUrl: cached.imageUrl };
+                return newScenes;
+            });
+            return;
+        }
+
+        // Check if already started (double check against recent state update)
+        let shouldStart = false;
+        setScenes(prev => {
+             if (!prev[idx].imageUrl && !prev[idx].isGeneratingImage) {
+                 shouldStart = true;
+                 const newScenes = [...prev];
+                 newScenes[idx] = { ...newScenes[idx], isGeneratingImage: true };
+                 return newScenes;
+             }
+             return prev;
+        });
+
+        if (!shouldStart) return;
 
         try {
             const base64Image = await generateSceneImage(scene.imagePrompt);
@@ -167,32 +187,52 @@ const App: React.FC = () => {
                 return newScenes;
             });
         }
-    });
+    };
+
+    // Load current scene immediately
+    await loadSceneImage(startIndex);
+
+    // Load next scene with a delay to respect rate limits
+    if (indicesToLoad.length > 1) {
+        setTimeout(() => {
+            loadSceneImage(indicesToLoad[1]);
+        }, 2500); // 2.5s delay
+    }
   }, []);
 
   const triggerAudioGeneration = useCallback(async (
     storyId: string,
     currentScenes: StoryScene[], 
-    index: number
+    startIndex: number
   ) => {
-    const indicesToLoad = [index, index + 1].filter(i => i < currentScenes.length);
+    const indicesToLoad = [startIndex, startIndex + 1].filter(i => i < currentScenes.length);
 
-    indicesToLoad.forEach(async (idx) => {
+    const loadSceneAudio = async (idx: number) => {
         const scene = currentScenes[idx];
 
-        if (scene.audioUrl || scene.isGeneratingAudio) return;
-
+        // Check cache
         const cached = getCachedMedia(storyId, idx);
-        if (cached?.audioUrl) return;
-
-        setScenes(prev => {
-            const newScenes = [...prev];
-            if (!newScenes[idx].audioUrl && !newScenes[idx].isGeneratingAudio) {
-                newScenes[idx] = { ...newScenes[idx], isGeneratingAudio: true };
+        if (cached?.audioUrl) {
+             setScenes(prev => {
+                const newScenes = [...prev];
+                newScenes[idx] = { ...newScenes[idx], audioUrl: cached.audioUrl };
                 return newScenes;
-            }
-            return prev;
+            });
+            return;
+        }
+
+        let shouldStart = false;
+        setScenes(prev => {
+             if (!prev[idx].audioUrl && !prev[idx].isGeneratingAudio) {
+                 shouldStart = true;
+                 const newScenes = [...prev];
+                 newScenes[idx] = { ...newScenes[idx], isGeneratingAudio: true };
+                 return newScenes;
+             }
+             return prev;
         });
+
+        if (!shouldStart) return;
 
         try {
             const textToSpeak = scene.narrative;
@@ -215,7 +255,17 @@ const App: React.FC = () => {
                 return newScenes;
             });
         }
-    });
+    };
+
+    // Load current immediately
+    await loadSceneAudio(startIndex);
+
+    // Load next with delay
+    if (indicesToLoad.length > 1) {
+        setTimeout(() => {
+            loadSceneAudio(indicesToLoad[1]);
+        }, 2500); // 2.5s delay
+    }
   }, []);
 
   const handleNext = () => {
@@ -256,12 +306,17 @@ const App: React.FC = () => {
                     onCreateStory={() => setIsCreateModalOpen(true)}
                     onDeleteStory={handleDeleteStory}
                     onReorderStories={handleReorderStories}
+                    onOpenAudit={() => setIsAuditModalOpen(true)}
                 />
                 <CreateStoryModal 
                     isOpen={isCreateModalOpen}
                     onClose={() => setIsCreateModalOpen(false)}
                     onSubmit={handleCreateStory}
                     isLoading={isGeneratingStory}
+                />
+                <AuditModal 
+                    isOpen={isAuditModalOpen}
+                    onClose={() => setIsAuditModalOpen(false)}
                 />
             </>
         )}

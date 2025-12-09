@@ -1,21 +1,35 @@
 # Panchatantra Tales - Kaggle Submission
 
-**Tagline:** Reimagining ancient wisdom with modern AI. An interactive, multimodal storybook for children.
+**Tagline:** Reimagining ancient wisdom with modern AI. An infinite, interactive storybook engine for children.
 
 ## The Challenge
-In a digital age, children often consume passive content that lacks educational value. Traditional moral stories, like the Panchatantra, are timeless but can feel outdated to modern kids. We wanted to bridge this gap by making moral education engaging, interactive, and personalized without increasing passive screen time.
+In a digital age, children often consume passive content that lacks educational value. Traditional moral stories, like the Panchatantra, are timeless but can feel outdated to modern kids. Furthermore, static books offer a finite experience—once read, the engagement ends. We wanted to bridge this gap by creating an app that offers **infinite**, personalized moral education.
 
 ## The Solution
-**Panchatantra Tales** is a web application that brings classic fables to life using Google's Gemini API. It transforms static text into a rich, read-along experience with:
+**Panchatantra Tales** is a web application that brings classic fables to life—and lets kids create new ones—using Google's Gemini API. It transforms text into a rich, read-along experience with:
 - **AI-Generated Illustrations**: Visualizing scenes in real-time.
 - **Narrative Text-to-Speech**: Soothing voiceovers for accessibility and engagement.
-- **Instant Playback**: Smart caching and pre-fetching for a seamless user experience.
+- **Infinite Story Engine**: A tool to generate brand new fables based on user-selected characters.
 
 ## Key Features
-- **Multimodal Storytelling**: Combines text, audio (TTS), and visuals (Image Gen) seamlessly.
-- **Kid-Friendly UI**: Simple navigation, large text, and colorful, engaging design optimized for tablets and desktops.
-- **Zero-Latency Feel**: Implements aggressive pre-fetching and parallel processing strategies to ensure stories play instantly.
-- **Moral Lessons**: Every story concludes with a distinct lesson to ensure educational value.
+
+### 1. 📖 Classic & Custom Stories
+- **Classic Collection**: Curated, pre-loaded tales with defined morals.
+- **Create Your Own**: Users enter a Main Character (e.g., "A brave Pig"), a Friend/Enemy ("A wise Owl"), and a Setting. Gemini 2.5 generates a unique 5-scene fable with a moral lesson in seconds.
+
+### 2. 🎨 Multimodal Immersion
+- **Visuals**: Consistent, 3D-animation style illustrations generated on the fly.
+- **Audio**: Instant Text-to-Speech narration using the 'Kore' voice.
+- **Text**: Kid-friendly fonts and large typography.
+
+### 3. 💾 Personal Library (Freemium Model)
+- **Save Creations**: Users can save up to 4 custom stories to their local library.
+- **Manage**: A dedicated management tab to reorder stories, delete old ones, or hide default tales.
+- **Upgrade Flow**: A mock paywall ($1/mo) demonstrates how this could be monetized when storage limits are reached.
+
+### 4. ⚡ Zero-Latency Performance
+- **Smart Caching**: Generated media is cached in-memory. Revisiting a page is instant.
+- **Parallel Prefetching**: The moment a story is selected, the app begins generating assets for the first few scenes in the background.
 
 ## Technical Architecture
 
@@ -23,19 +37,23 @@ In a digital age, children often consume passive content that lacks educational 
 - **Framework**: React 19
 - **Styling**: Tailwind CSS
 - **Language**: TypeScript
-- **Icons**: Lucide React
+- **State Management**: React Hooks + LocalStorage for persistence.
 
 ### AI Integration (Google Gemini API)
 We utilize the `@google/genai` SDK to power the core features:
-1.  **Visuals**: `gemini-2.5-flash-image` generates consistent, 3D-animation style illustrations for each scene.
-    *   *Prompt Engineering*: "cute 3d animation style, pixar style, soft lighting" appended to scene descriptions.
-2.  **Audio**: `gemini-2.5-flash-preview-tts` converts narrative text into high-quality speech.
-    *   *Voice*: Using the 'Kore' prebuilt voice for a soothing, story-telling tone.
 
-### Performance Optimizations
-- **Parallel Generation**: Image and Audio requests for current and upcoming scenes are fired concurrently using `Promise.all` patterns.
-- **In-Memory Caching**: A custom `mediaCache` service stores generated assets (Base64 images and Blob URLs). Revisiting a page or story requires zero API calls.
-- **Pre-fetching**: Media generation starts the moment a story is selected, often completing before the user clicks "Start Reading".
+1.  **Story Generation (Reasoning)**: `gemini-2.5-flash`
+    *   We use **JSON Schema Enforcement** to ensure the AI returns a strictly structured JSON object containing: Title, Lesson, and exactly 5 Scenes (Narrative + Image Prompts).
+2.  **Visuals**: `gemini-2.5-flash-image`
+    *   Generates consistent, square aspect-ratio images based on the prompts derived from step 1.
+3.  **Audio**: `gemini-2.5-flash-preview-tts`
+    *   Converts narrative text into raw PCM audio, which we encode to WAV on the client side for playback.
+
+### Storage Strategy
+To respect browser storage quotas (~5MB):
+- We **do not** save base64 images or audio blobs to LocalStorage.
+- We only save the **Text Structure** (Title, Scenes, Prompts) of custom stories.
+- When a saved story is opened, the app re-generates or re-fetches media on demand, keeping the storage footprint negligible.
 
 ## How to Run
 1.  Clone the repository.
@@ -53,9 +71,9 @@ We utilize the `@google/genai` SDK to power the core features:
     ```
 
 ## Future Roadmap
-- **Custom Stories**: Allow kids to create their own avatars and star in the fables.
-- **Multi-language Support**: Translate stories and audio into Hindi, Spanish, and French using Gemini's translation capabilities.
-- **Interactive Quizzes**: Simple questions at the end to test comprehension.
+- **Voice Input**: Allow kids to dictate their story ideas instead of typing.
+- **Multi-language Support**: Translate stories and audio into Hindi, Spanish, and French on the fly.
+- **Character Consistency**: Use advanced prompting or LoRA adapters to keep the "Main Character" visually identical across all 5 scenes.
 
 ---
 *Built for the Google AI Hackathon by Swapan Roy.*

@@ -11,6 +11,7 @@ interface LibraryProps {
   onDeleteStory: (id: string) => void;
   onReorderStories: (stories: Story[]) => void;
   onOpenAudit: () => void;
+  isAdmin: boolean;
 }
 
 const colorVariants: Record<string, string> = {
@@ -188,7 +189,7 @@ const ManageCard: React.FC<ManageCardProps> = ({ story, index, isCustom, isFirst
     );
 };
 
-export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, onSelectStory, onCreateStory, onDeleteStory, onReorderStories, onOpenAudit }) => {
+export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, onSelectStory, onCreateStory, onDeleteStory, onReorderStories, onOpenAudit, isAdmin }) => {
   const [activeTab, setActiveTab] = useState<Tab>('read');
 
   const handleMove = (index: number, direction: 'left' | 'right') => {
@@ -286,13 +287,15 @@ export const Library: React.FC<LibraryProps> = ({ savedStories, defaultStories, 
                     </div>
                     
                     {/* AUDIT LOG BUTTON */}
-                    <button 
-                        onClick={onOpenAudit}
-                        className="bg-white hover:bg-purple-100 text-purple-700 border-2 border-purple-200 font-bold py-3 px-6 rounded-xl flex items-center gap-2 transition-all shadow-sm hover:shadow-md"
-                    >
-                        <Activity size={20} />
-                        View Audit Logs
-                    </button>
+                    {isAdmin && (
+                        <button 
+                            onClick={onOpenAudit}
+                            className="bg-white hover:bg-purple-100 text-purple-700 border-2 border-purple-200 font-bold py-3 px-6 rounded-xl flex items-center gap-2 transition-all shadow-sm hover:shadow-md"
+                        >
+                            <Activity size={20} />
+                            View Audit Logs
+                        </button>
+                    )}
                  </div>
 
                  {/* Custom Stories Section */}

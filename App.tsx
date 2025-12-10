@@ -8,11 +8,14 @@ import { StoryScene, AppState, Story } from './types';
 import { BookCover } from './components/BookCover';
 import { SceneViewer } from './components/SceneViewer';
 import { Library } from './components/Library';
-import { CreateStoryModal } from './components/CreateStoryModal';
-import { UpgradeModal } from './components/UpgradeModal';
-import { AuditModal } from './components/AuditModal';
 import { ErrorDisplay } from './components/UI';
 import { Home, Lightbulb, Save, Check } from 'lucide-react';
+import { initAssetStorage } from './services/assetStorage';
+
+// Lazy load modals for faster initial bundle load
+const CreateStoryModal = React.lazy(() => import('./components/CreateStoryModal').then(module => ({ default: module.CreateStoryModal })));
+const UpgradeModal = React.lazy(() => import('./components/UpgradeModal').then(module => ({ default: module.UpgradeModal })));
+const AuditModal = React.lazy(() => import('./components/AuditModal').then(module => ({ default: module.AuditModal })));
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>('library');
@@ -43,6 +46,7 @@ const App: React.FC = () => {
 
   // Load saved stories, hidden defaults, and admin status on mount
   useEffect(() => {
+      initAssetStorage().catch(console.error); // Init IndexedDB
       setSavedStories(getSavedStories());
       setHiddenStoryIds(getHiddenDefaultStories());
       
@@ -56,7 +60,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleSelectStory = (story: Story) => {
-    // Clear any pending requests from previous interactions to free up bandwidth/quota
+    // Clear any pending requests from previous interactions
     clearAllTimeouts();
 
     setSelectedStory(story);
@@ -78,10 +82,28 @@ const App: React.FC = () => {
     setScenes(initialScenes);
     setAppState('intro');
 
-    // Trigger immediate generation for the first scene (Scene 0)
-    // We delay Scene 1 slightly to prioritize Scene 0's assets
-    triggerImageGeneration(story.id, initialScenes, 0);
+    // --- BANDWIDTH-AWARE SCHEDULING ---
+    // Prioritize Audio (fastest/smallest) then Image (heaviest)
+    
+    // 1. Scene 0 Audio: IMMEDIATE (0ms) - Ensures "Read Aloud" works instantly
     triggerAudioGeneration(story.id, initialScenes, 0);
+
+    // 2. Scene 0 Image: FAST (100ms) - Tiny delay allows audio request to establish priority
+    const t0 = window.setTimeout(() => {
+        triggerImageGeneration(story.id, initialScenes, 0);
+    }, 100);
+
+    // 3. Scene 1 Audio: AGGRESSIVE PREFETCH (500ms) - Audio is small, get it ready for next page ASAP
+    const t1 = window.setTimeout(() => {
+        triggerAudioGeneration(story.id, initialScenes, 1);
+    }, 500);
+
+    // 4. Scene 1 Image: DELAYED (3500ms) - Heavy load, wait until Scene 0 assets are likely safely buffering
+    const t2 = window.setTimeout(() => {
+        triggerImageGeneration(story.id, initialScenes, 1);
+    }, 3500);
+    
+    timeoutsRef.current.push(t0, t1, t2);
   };
 
   const handleCreateStory = async (mainChar: string, secondChar: string, setting: string) => {
@@ -151,8 +173,8 @@ const App: React.FC = () => {
     currentScenes: StoryScene[], 
     startIndex: number
   ) => {
-    // Only load current and next
-    const indicesToLoad = [startIndex, startIndex + 1].filter(i => i < currentScenes.length);
+    // Only process valid index
+    if (startIndex >= currentScenes.length) return;
 
     const loadSceneImage = async (idx: number) => {
         // Synchronous check: Do we already have it or is it working?
@@ -163,7 +185,6 @@ const App: React.FC = () => {
         if (cached?.imageUrl) {
              setScenes(prev => {
                 const newScenes = [...prev];
-                // Only update if not already set
                 if (!newScenes[idx].imageUrl) {
                     newScenes[idx] = { ...newScenes[idx], imageUrl: cached.imageUrl };
                 }
@@ -186,7 +207,9 @@ const App: React.FC = () => {
         if (!needsLoading) return;
 
         try {
-            const base64Image = await generateSceneImage(currentScenes[idx].imagePrompt);
+            const isClassic = !storyId.startsWith('custom-');
+            const base64Image = await generateSceneImage(currentScenes[idx].imagePrompt, isClassic, storyId, idx);
+            
             saveCachedMedia(storyId, idx, { imageUrl: base64Image });
             setScenes(prev => {
                 const newScenes = [...prev];
@@ -207,20 +230,7 @@ const App: React.FC = () => {
         }
     };
 
-    // --- Scheduling Logic ---
-    
-    // 1. Load Current Scene Immediately
     loadSceneImage(startIndex);
-
-    // 2. Schedule Next Scene (Staggered to prevent 429 Rate Limits)
-    if (indicesToLoad.length > 1) {
-        const nextIndex = indicesToLoad[1];
-        // Increased delay to 3500ms to further reduce 429 errors
-        const timerId = window.setTimeout(() => {
-            loadSceneImage(nextIndex);
-        }, 3500);
-        timeoutsRef.current.push(timerId);
-    }
   }, []);
 
   const triggerAudioGeneration = useCallback((
@@ -228,7 +238,7 @@ const App: React.FC = () => {
     currentScenes: StoryScene[], 
     startIndex: number
   ) => {
-    const indicesToLoad = [startIndex, startIndex + 1].filter(i => i < currentScenes.length);
+    if (startIndex >= currentScenes.length) return;
 
     const loadSceneAudio = async (idx: number) => {
         let needsLoading = false;
@@ -260,8 +270,10 @@ const App: React.FC = () => {
         if (!needsLoading) return;
 
         try {
+            const isClassic = !storyId.startsWith('custom-');
             const textToSpeak = currentScenes[idx].narrative;
-            const audioBlobUrl = await generateSpeech(textToSpeak);
+            const audioBlobUrl = await generateSpeech(textToSpeak, isClassic, storyId, idx);
+            
             saveCachedMedia(storyId, idx, { audioUrl: audioBlobUrl });
             setScenes(prev => {
                 const newScenes = [...prev];
@@ -282,29 +294,18 @@ const App: React.FC = () => {
         }
     };
 
-    // --- Scheduling Logic ---
-
-    // 1. Load Current Audio Immediately (Audio is fast/light)
     loadSceneAudio(startIndex);
-
-    // 2. Schedule Next Audio
-    if (indicesToLoad.length > 1) {
-        const nextIndex = indicesToLoad[1];
-        // Increased delay to 3500ms to ensure better reliability
-        const timerId = window.setTimeout(() => {
-            loadSceneAudio(nextIndex);
-        }, 3500);
-        timeoutsRef.current.push(timerId);
-    }
   }, []);
 
   const handleNext = () => {
     if (currentSceneIndex < scenes.length - 1 && selectedStory) {
       const nextIndex = currentSceneIndex + 1;
       setCurrentSceneIndex(nextIndex);
-      // Trigger background loading for next+1
-      triggerImageGeneration(selectedStory.id, scenes, nextIndex);
-      triggerAudioGeneration(selectedStory.id, scenes, nextIndex);
+      
+      // Lookahead: Trigger loading for index + 1 (the one after the new current)
+      // We run these parallel now as the heavy initial load is likely done
+      triggerImageGeneration(selectedStory.id, scenes, nextIndex + 1);
+      triggerAudioGeneration(selectedStory.id, scenes, nextIndex + 1);
     } else {
       setAppState('finished');
     }
@@ -330,29 +331,34 @@ const App: React.FC = () => {
   return (
     <>
         {appState === 'library' && (
-            <>
-                <Library 
-                    savedStories={savedStories}
-                    defaultStories={visibleDefaultStories} 
-                    onSelectStory={handleSelectStory} 
-                    onCreateStory={() => setIsCreateModalOpen(true)}
-                    onDeleteStory={handleDeleteStory}
-                    onReorderStories={handleReorderStories}
-                    onOpenAudit={() => setIsAuditModalOpen(true)}
-                    isAdmin={isAdmin}
-                />
-                <CreateStoryModal 
-                    isOpen={isCreateModalOpen}
-                    onClose={() => setIsCreateModalOpen(false)}
-                    onSubmit={handleCreateStory}
-                    isLoading={isGeneratingStory}
-                />
-                <AuditModal 
-                    isOpen={isAuditModalOpen}
-                    onClose={() => setIsAuditModalOpen(false)}
-                />
-            </>
+            <Library 
+                savedStories={savedStories}
+                defaultStories={visibleDefaultStories} 
+                onSelectStory={handleSelectStory} 
+                onCreateStory={() => setIsCreateModalOpen(true)}
+                onDeleteStory={handleDeleteStory}
+                onReorderStories={handleReorderStories}
+                onOpenAudit={() => setIsAuditModalOpen(true)}
+                isAdmin={isAdmin}
+            />
         )}
+
+        <React.Suspense fallback={null}>
+            <CreateStoryModal 
+                isOpen={isCreateModalOpen}
+                onClose={() => setIsCreateModalOpen(false)}
+                onSubmit={handleCreateStory}
+                isLoading={isGeneratingStory}
+            />
+            <AuditModal 
+                isOpen={isAuditModalOpen}
+                onClose={() => setIsAuditModalOpen(false)}
+            />
+            <UpgradeModal 
+                isOpen={isUpgradeModalOpen} 
+                onClose={() => setIsUpgradeModalOpen(false)} 
+            />
+        </React.Suspense>
 
         {appState === 'intro' && selectedStory && (
             <BookCover 
@@ -366,11 +372,12 @@ const App: React.FC = () => {
             <ErrorDisplay message={error || 'Unknown error'} onRetry={handleReturnToLibrary} />
         )}
 
-        {appState === 'reading' && (
+        {appState === 'reading' && selectedStory && (
             <SceneViewer 
                 scene={scenes[currentSceneIndex]} 
                 sceneIndex={currentSceneIndex}
                 totalScenes={scenes.length}
+                storyColor={selectedStory.color}
                 onNext={handleNext}
                 onPrev={handlePrev}
             />
@@ -440,11 +447,6 @@ const App: React.FC = () => {
                 <p className="mt-8 text-yellow-700/60 font-bold text-sm tracking-wide">
                     Generated by {selectedStory?.author || 'Swapan Roy'}
                 </p>
-                
-                <UpgradeModal 
-                    isOpen={isUpgradeModalOpen} 
-                    onClose={() => setIsUpgradeModalOpen(false)} 
-                />
             </div>
         )}
     </>

@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { logTransaction } from "./auditService";
+import { getStoredAsset, storeAsset } from "./assetStorage";
 
 const getClient = () => {
   const apiKey = process.env.API_KEY;
@@ -17,7 +18,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const retryWithBackoff = async <T>(
   operation: () => Promise<T>,
   retries = 3,
-  delay = 2000,
+  delay = 1000, // Reduced from 2000ms for snappier retries
   operationName = "API Call"
 ): Promise<T> => {
   try {
@@ -43,13 +44,27 @@ const retryWithBackoff = async <T>(
 
 // --- API Functions ---
 
-export const generateSceneImage = async (prompt: string): Promise<string> => {
+export const generateSceneImage = async (
+  prompt: string,
+  isClassic: boolean = false,
+  storyId?: string,
+  sceneIndex?: number
+): Promise<string> => {
+    // 1. Check persistent asset storage first for ALL stories (Universal Cache)
+    if (storyId && sceneIndex !== undefined) {
+        const storedImage = await getStoredAsset(storyId, sceneIndex, 'image');
+        if (storedImage) {
+            console.log(`[AssetStorage] Hit for Image: ${storyId}-${sceneIndex}`);
+            return storedImage;
+        }
+    }
+
   return retryWithBackoff(
     async () => {
       const ai = getClient();
       
-      // Inject style modifiers for consistent, high-quality results
-      const styledPrompt = `${prompt}, vibrant 3d animation style, pixar style, disney style, cute, soft lighting, 8k resolution, high detail, masterpiece`;
+      // Optimized style modifiers: Removed "4k resolution" for faster generation, keeping high stylistic quality
+      const styledPrompt = `${prompt}, bright and colorful 3d animation style, disney pixar style, expressive characters, soft cinematic lighting, high contrast, masterpiece`;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash-image",
@@ -74,7 +89,14 @@ export const generateSceneImage = async (prompt: string): Promise<string> => {
       if (response.candidates && response.candidates[0].content.parts) {
         for (const part of response.candidates[0].content.parts) {
           if (part.inlineData && part.inlineData.data) {
-            return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            const base64Image = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            
+            // Save to persistent storage for ALL stories (Universal Cache)
+            if (storyId && sceneIndex !== undefined) {
+                storeAsset(storyId, sceneIndex, 'image', base64Image).catch(console.error);
+            }
+            
+            return base64Image;
           }
         }
       }
@@ -82,12 +104,26 @@ export const generateSceneImage = async (prompt: string): Promise<string> => {
       throw new Error("No image data found in response");
     },
     3,
-    2000,
+    1000, // Faster initial retry
     "generateSceneImage"
   );
 };
 
-export const generateSpeech = async (text: string): Promise<string> => {
+export const generateSpeech = async (
+  text: string,
+  isClassic: boolean = false,
+  storyId?: string,
+  sceneIndex?: number
+): Promise<string> => {
+    // 1. Check persistent asset storage first
+    if (storyId && sceneIndex !== undefined) {
+        const storedAudio = await getStoredAsset(storyId, sceneIndex, 'audio');
+        if (storedAudio) {
+            console.log(`[AssetStorage] Hit for Audio: ${storyId}-${sceneIndex}`);
+            return storedAudio;
+        }
+    }
+
   return retryWithBackoff(
     async () => {
       const ai = getClient();
@@ -121,10 +157,23 @@ export const generateSpeech = async (text: string): Promise<string> => {
 
       // Convert Base64 PCM to WAV Blob URL
       const audioBlob = base64PCMToWavBlob(base64Audio);
-      return URL.createObjectURL(audioBlob);
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      // Save to persistent storage for ALL stories
+      if (storyId && sceneIndex !== undefined) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              if (typeof reader.result === 'string') {
+                  storeAsset(storyId, sceneIndex, 'audio', reader.result).catch(console.error);
+              }
+          };
+          reader.readAsDataURL(audioBlob);
+      }
+
+      return audioUrl;
     },
     3,
-    2000,
+    1000, // Faster initial retry
     "generateSpeech"
   );
 };
@@ -138,11 +187,12 @@ export const generateCustomStory = async (
     async () => {
       const ai = getClient();
 
+      // Optimize prompt for concise narration (1 sentence max) to speed up TTS generation
       const prompt = `Write a short children's story (Panchatantra style) about a ${mainChar} and a ${secondChar} in ${setting}. 
     It must have a moral lesson suitable for 5-7 year olds.
     Structure it into exactly 5 scenes.
     Provide a creative title, a short lesson, and for each scene provide:
-    1. narrative: simple English, 2 sentences max.
+    1. narrative: simple English, 1 short and exciting sentence max.
     2. imagePrompt: visually descriptive, specifying character emotions, cute 3d animation style, consistent appearance.`;
 
       const response = await ai.models.generateContent({
@@ -183,7 +233,7 @@ export const generateCustomStory = async (
       throw new Error("Failed to generate story structure");
     },
     2,
-    3000,
+    2000,
     "generateCustomStory"
   );
 };

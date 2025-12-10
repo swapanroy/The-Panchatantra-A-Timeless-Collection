@@ -1,17 +1,37 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { StoryScene } from '../types';
-import { ChevronLeft, ChevronRight, Loader2, Play, Pause, FastForward } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Play, Pause } from 'lucide-react';
 
 interface SceneViewerProps {
   scene: StoryScene;
   sceneIndex: number;
   totalScenes: number;
+  storyColor?: string;
   onNext: () => void;
   onPrev: () => void;
 }
 
-export const SceneViewer: React.FC<SceneViewerProps> = ({ scene, sceneIndex, totalScenes, onNext, onPrev }) => {
+// Map story colors to nice gradients for the placeholder
+const placeholderGradients: Record<string, string> = {
+  green: 'from-green-100 to-green-50',
+  orange: 'from-orange-100 to-orange-50',
+  blue: 'from-blue-100 to-blue-50',
+  teal: 'from-teal-100 to-teal-50',
+  purple: 'from-purple-100 to-purple-50',
+  red: 'from-red-100 to-red-50',
+};
+
+const placeholderAccents: Record<string, string> = {
+  green: 'bg-green-200 text-green-600',
+  orange: 'bg-orange-200 text-orange-600',
+  blue: 'bg-blue-200 text-blue-600',
+  teal: 'bg-teal-200 text-teal-600',
+  purple: 'bg-purple-200 text-purple-600',
+  red: 'bg-red-200 text-red-600',
+};
+
+export const SceneViewer: React.FC<SceneViewerProps> = ({ scene, sceneIndex, totalScenes, storyColor = 'green', onNext, onPrev }) => {
   const isFirst = sceneIndex === 0;
   const isLast = sceneIndex === totalScenes - 1;
   
@@ -76,15 +96,18 @@ export const SceneViewer: React.FC<SceneViewerProps> = ({ scene, sceneIndex, tot
 
   // Safe access for the image
   const hasImage = !!scene.imageUrl;
+  const gradientClass = placeholderGradients[storyColor] || placeholderGradients.green;
+  const accentClass = placeholderAccents[storyColor] || placeholderAccents.green;
   
   return (
     <div className="min-h-screen bg-[#f0fdf4] flex flex-col items-center justify-center p-4 md:p-6 lg:p-8 font-['Fredoka']">
       
-      {/* Hidden Audio Element */}
+      {/* Hidden Audio Element with Preload Auto for better performance */}
       {scene.audioUrl && (
           <audio 
             ref={audioRef} 
             src={scene.audioUrl} 
+            preload="auto"
             onEnded={handleAudioEnded}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
@@ -108,19 +131,28 @@ export const SceneViewer: React.FC<SceneViewerProps> = ({ scene, sceneIndex, tot
       <div className="w-full max-w-5xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[75vh] border-4 border-white">
         
         {/* Image Section */}
-        <div className="w-full md:w-1/2 bg-green-50 relative flex items-center justify-center p-6 overflow-hidden min-h-[300px]">
-            <div className="absolute inset-0 bg-green-100/50 pattern-grid-lg opacity-20"></div>
-            
+        <div className="w-full md:w-1/2 bg-gray-50 relative flex items-center justify-center p-6 overflow-hidden min-h-[350px]">
             {hasImage ? (
                 <img 
                     src={scene.imageUrl} 
                     alt={`Scene ${sceneIndex + 1}`} 
-                    className="w-full h-full object-contain rounded-2xl shadow-lg transform transition-transform duration-700 hover:scale-105"
+                    className="w-full h-full object-contain rounded-2xl shadow-lg transform transition-transform duration-700 hover:scale-105 animate-fadeIn"
+                    loading="eager" // Important for rapid sequential viewing
                 />
             ) : (
-                <div className="flex flex-col items-center justify-center text-green-300 p-8 text-center">
-                    <Loader2 className="w-20 h-20 animate-spin mb-6" />
-                    <p className="text-2xl font-bold text-green-600 animate-pulse">Painting the picture...</p>
+                /* Thematic Placeholder for Instant Load Perception */
+                <div className={`w-full h-full rounded-2xl bg-gradient-to-br ${gradientClass} animate-pulse flex flex-col items-center justify-center text-center p-8 border-4 border-white shadow-inner relative overflow-hidden`}>
+                    
+                    {/* Abstract Shapes for better aesthetic */}
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-20 rounded-full blur-2xl transform translate-x-10 -translate-y-10"></div>
+                    <div className="absolute bottom-0 left-0 w-40 h-40 bg-black opacity-5 rounded-full blur-2xl transform -translate-x-10 translate-y-10"></div>
+
+                    <div className={`relative z-10 w-24 h-24 rounded-full ${accentClass} bg-opacity-20 flex items-center justify-center mb-6 backdrop-blur-sm`}>
+                        <Loader2 className="w-10 h-10 animate-spin opacity-60" />
+                    </div>
+                    <h3 className={`relative z-10 text-2xl font-black opacity-50 uppercase tracking-widest ${storyColor === 'orange' || storyColor === 'green' ? 'text-gray-700' : 'text-white'}`}>
+                        Creating Magic...
+                    </h3>
                 </div>
             )}
         </div>

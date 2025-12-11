@@ -18,7 +18,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const retryWithBackoff = async <T>(
   operation: () => Promise<T>,
   retries = 3,
-  delay = 1000, // Reduced from 2000ms for snappier retries
+  delay = 250, // Fast retry for better UX
   operationName = "API Call"
 ): Promise<T> => {
   try {
@@ -63,8 +63,8 @@ export const generateSceneImage = async (
     async () => {
       const ai = getClient();
       
-      // Optimized style modifiers: Removed "4k resolution" for faster generation, keeping high stylistic quality
-      const styledPrompt = `${prompt}, bright and colorful 3d animation style, disney pixar style, expressive characters, soft cinematic lighting, high contrast, masterpiece`;
+      // Simplified style prompt to improve generation speed/consistency
+      const styledPrompt = `${prompt}, cute 3d animation style, bright colors, soft lighting`;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash-image",
@@ -104,7 +104,7 @@ export const generateSceneImage = async (
       throw new Error("No image data found in response");
     },
     3,
-    1000, // Faster initial retry
+    250, // Faster initial retry
     "generateSceneImage"
   );
 };
@@ -173,7 +173,7 @@ export const generateSpeech = async (
       return audioUrl;
     },
     3,
-    1000, // Faster initial retry
+    250, // Faster initial retry
     "generateSpeech"
   );
 };
@@ -187,7 +187,6 @@ export const generateCustomStory = async (
     async () => {
       const ai = getClient();
 
-      // Optimize prompt for concise narration (1 sentence max) to speed up TTS generation
       const prompt = `Write a short children's story (Panchatantra style) about a ${mainChar} and a ${secondChar} in ${setting}. 
     It must have a moral lesson suitable for 5-7 year olds.
     Structure it into exactly 5 scenes.
@@ -233,7 +232,7 @@ export const generateCustomStory = async (
       throw new Error("Failed to generate story structure");
     },
     2,
-    2000,
+    500, // Reduced from 1000
     "generateCustomStory"
   );
 };

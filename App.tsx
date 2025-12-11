@@ -36,16 +36,14 @@ const App: React.FC = () => {
   // Admin Mode
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Request Management
-  const timeoutsRef = useRef<number[]>([]);
-
-  const clearAllTimeouts = () => {
-      timeoutsRef.current.forEach(window.clearTimeout);
-      timeoutsRef.current = [];
-  };
+  // Concurrency Control: Track active generations to prevent duplicates
+  // Key format: `${storyId}-${sceneIndex}-${type}` (type: 'image' | 'audio')
+  const activeGenerations = useRef<Set<string>>(new Set());
+  const isMounted = useRef(true);
 
   // Load saved stories, hidden defaults, and admin status on mount
   useEffect(() => {
+      isMounted.current = true;
       initAssetStorage().catch(console.error); // Init IndexedDB
       setSavedStories(getSavedStories());
       setHiddenStoryIds(getHiddenDefaultStories());
@@ -55,25 +53,134 @@ const App: React.FC = () => {
           setIsAdmin(true);
       }
       
-      // Cleanup on unmount
-      return () => clearAllTimeouts();
+      return () => { isMounted.current = false; };
   }, []);
 
+  // --- CORE GENERATION LOGIC ---
+
+  const triggerSceneAssets = useCallback(async (
+    storyId: string,
+    currentScenes: StoryScene[],
+    index: number
+  ) => {
+    if (index >= currentScenes.length) return;
+
+    // Helper to generate a specific asset type
+    const generateAsset = async (type: 'image' | 'audio') => {
+        const key = `${storyId}-${index}-${type}`;
+        
+        // 1. Sync check: Is this already running?
+        if (activeGenerations.current.has(key)) return;
+
+        // 2. Check Memory Cache (Fastest) - Avoids React state update if already valid
+        // We check the passed `currentScenes` as a proxy for the latest state
+        const scene = currentScenes[index];
+        if (type === 'image' && scene.imageUrl) return;
+        if (type === 'audio' && scene.audioUrl) return;
+
+        // 3. Check Service Cache (Memory Cache utility)
+        const cached = getCachedMedia(storyId, index);
+        if (type === 'image' && cached?.imageUrl) {
+             setScenes(prev => {
+                const newScenes = [...prev];
+                if (!newScenes[index].imageUrl) {
+                    newScenes[index] = { ...newScenes[index], imageUrl: cached.imageUrl, isGeneratingImage: false };
+                }
+                return newScenes;
+            });
+            return;
+        }
+        if (type === 'audio' && cached?.audioUrl) {
+            setScenes(prev => {
+                const newScenes = [...prev];
+                if (!newScenes[index].audioUrl) {
+                    newScenes[index] = { ...newScenes[index], audioUrl: cached.audioUrl, isGeneratingAudio: false };
+                }
+                return newScenes;
+            });
+            return;
+        }
+
+        // 4. Mark Active & Set Loading State
+        activeGenerations.current.add(key);
+        
+        setScenes(prev => {
+            const newScenes = [...prev];
+            // Only update if we still need to load
+            if (type === 'image' && !newScenes[index].imageUrl) {
+                newScenes[index] = { ...newScenes[index], isGeneratingImage: true };
+            } else if (type === 'audio' && !newScenes[index].audioUrl) {
+                newScenes[index] = { ...newScenes[index], isGeneratingAudio: true };
+            }
+            return newScenes;
+        });
+
+        try {
+            let resultUrl: string | null = null;
+            const isClassic = !storyId.startsWith('custom-');
+
+            if (type === 'image') {
+                // This call internally checks IndexedDB first
+                resultUrl = await generateSceneImage(currentScenes[index].imagePrompt, isClassic, storyId, index);
+            } else {
+                // This call internally checks IndexedDB first
+                resultUrl = await generateSpeech(currentScenes[index].narrative, isClassic, storyId, index);
+            }
+
+            // 5. Update State & Cache
+            if (isMounted.current && resultUrl) {
+                setScenes(prev => {
+                    const newScenes = [...prev];
+                    if (type === 'image') {
+                        newScenes[index] = { ...newScenes[index], imageUrl: resultUrl, isGeneratingImage: false };
+                    } else {
+                        newScenes[index] = { ...newScenes[index], audioUrl: resultUrl, isGeneratingAudio: false };
+                    }
+                    return newScenes;
+                });
+                
+                // Update memory cache for instant session reuse
+                saveCachedMedia(storyId, index, type === 'image' ? { imageUrl: resultUrl } : { audioUrl: resultUrl });
+            }
+        } catch (e) {
+            console.error(`Failed to generate ${type} for scene ${index}`, e);
+            if (isMounted.current) {
+                setScenes(prev => {
+                    const newScenes = [...prev];
+                    if (type === 'image') {
+                        newScenes[index] = { ...newScenes[index], isGeneratingImage: false };
+                    } else {
+                        newScenes[index] = { ...newScenes[index], isGeneratingAudio: false };
+                    }
+                    return newScenes;
+                });
+            }
+        } finally {
+            activeGenerations.current.delete(key);
+        }
+    };
+
+    // Trigger both in parallel
+    generateAsset('image');
+    generateAsset('audio');
+  }, []);
+
+
   const handleSelectStory = (story: Story) => {
-    // Clear any pending requests from previous interactions
-    clearAllTimeouts();
+    // Clear legacy timeouts if any (though we removed them, good practice to reset refs)
+    activeGenerations.current.clear();
 
     setSelectedStory(story);
     setHasSavedCurrentStory(!!story.isCustom && savedStories.some(s => s.id === story.id));
     
-    // Initialize scenes with cached data if available (Instant Load)
+    // Initialize scenes with potentially cached data from memory
     const initialScenes: StoryScene[] = story.scenes.map((s, index) => {
         const cached = getCachedMedia(story.id, index);
         return {
             narrative: s.narrative,
             imagePrompt: s.imagePrompt,
-            imageUrl: cached?.imageUrl, // Hydrate from cache
-            audioUrl: cached?.audioUrl, // Hydrate from cache
+            imageUrl: cached?.imageUrl,
+            audioUrl: cached?.audioUrl,
             isGeneratingImage: false,
             isGeneratingAudio: false
         };
@@ -82,28 +189,10 @@ const App: React.FC = () => {
     setScenes(initialScenes);
     setAppState('intro');
 
-    // --- BANDWIDTH-AWARE SCHEDULING ---
-    // Prioritize Audio (fastest/smallest) then Image (heaviest)
-    
-    // 1. Scene 0 Audio: IMMEDIATE (0ms) - Ensures "Read Aloud" works instantly
-    triggerAudioGeneration(story.id, initialScenes, 0);
-
-    // 2. Scene 0 Image: FAST (100ms) - Tiny delay allows audio request to establish priority
-    const t0 = window.setTimeout(() => {
-        triggerImageGeneration(story.id, initialScenes, 0);
-    }, 100);
-
-    // 3. Scene 1 Audio: AGGRESSIVE PREFETCH (500ms) - Audio is small, get it ready for next page ASAP
-    const t1 = window.setTimeout(() => {
-        triggerAudioGeneration(story.id, initialScenes, 1);
-    }, 500);
-
-    // 4. Scene 1 Image: DELAYED (3500ms) - Heavy load, wait until Scene 0 assets are likely safely buffering
-    const t2 = window.setTimeout(() => {
-        triggerImageGeneration(story.id, initialScenes, 1);
-    }, 3500);
-    
-    timeoutsRef.current.push(t0, t1, t2);
+    // --- AGGRESSIVE PARALLEL PREFETCHING ---
+    // Immediately start the pipeline for the first 4 scenes.
+    // The browser handles network queuing; we just want to ensure the requests are queued.
+    [0, 1, 2, 3].forEach(idx => triggerSceneAssets(story.id, initialScenes, idx));
   };
 
   const handleCreateStory = async (mainChar: string, secondChar: string, setting: string) => {
@@ -166,146 +255,26 @@ const App: React.FC = () => {
     if (!selectedStory) return;
     setAppState('reading');
     setCurrentSceneIndex(0);
+    
+    // Reinforce loading for first scene in case it wasn't caught by prefetch
+    triggerSceneAssets(selectedStory.id, scenes, 0);
+    // Ensure scene 1 is also prioritized
+    triggerSceneAssets(selectedStory.id, scenes, 1);
   };
-
-  const triggerImageGeneration = useCallback((
-    storyId: string,
-    currentScenes: StoryScene[], 
-    startIndex: number
-  ) => {
-    // Only process valid index
-    if (startIndex >= currentScenes.length) return;
-
-    const loadSceneImage = async (idx: number) => {
-        // Synchronous check: Do we already have it or is it working?
-        let needsLoading = false;
-        
-        // 1. Check Cache
-        const cached = getCachedMedia(storyId, idx);
-        if (cached?.imageUrl) {
-             setScenes(prev => {
-                const newScenes = [...prev];
-                if (!newScenes[idx].imageUrl) {
-                    newScenes[idx] = { ...newScenes[idx], imageUrl: cached.imageUrl };
-                }
-                return newScenes;
-            });
-            return;
-        }
-
-        // 2. Check State & Mark as Generating
-        setScenes(prev => {
-             if (!prev[idx].imageUrl && !prev[idx].isGeneratingImage) {
-                 needsLoading = true;
-                 const newScenes = [...prev];
-                 newScenes[idx] = { ...newScenes[idx], isGeneratingImage: true };
-                 return newScenes;
-             }
-             return prev;
-        });
-
-        if (!needsLoading) return;
-
-        try {
-            const isClassic = !storyId.startsWith('custom-');
-            const base64Image = await generateSceneImage(currentScenes[idx].imagePrompt, isClassic, storyId, idx);
-            
-            saveCachedMedia(storyId, idx, { imageUrl: base64Image });
-            setScenes(prev => {
-                const newScenes = [...prev];
-                newScenes[idx] = { 
-                    ...newScenes[idx], 
-                    imageUrl: base64Image, 
-                    isGeneratingImage: false 
-                };
-                return newScenes;
-            });
-        } catch (e) {
-            console.error(`Failed to generate image for scene ${idx}`, e);
-            setScenes(prev => {
-                const newScenes = [...prev];
-                newScenes[idx] = { ...newScenes[idx], isGeneratingImage: false }; 
-                return newScenes;
-            });
-        }
-    };
-
-    loadSceneImage(startIndex);
-  }, []);
-
-  const triggerAudioGeneration = useCallback((
-    storyId: string,
-    currentScenes: StoryScene[], 
-    startIndex: number
-  ) => {
-    if (startIndex >= currentScenes.length) return;
-
-    const loadSceneAudio = async (idx: number) => {
-        let needsLoading = false;
-
-        // 1. Check Cache
-        const cached = getCachedMedia(storyId, idx);
-        if (cached?.audioUrl) {
-             setScenes(prev => {
-                const newScenes = [...prev];
-                if (!newScenes[idx].audioUrl) {
-                     newScenes[idx] = { ...newScenes[idx], audioUrl: cached.audioUrl };
-                }
-                return newScenes;
-            });
-            return;
-        }
-
-        // 2. Check State
-        setScenes(prev => {
-             if (!prev[idx].audioUrl && !prev[idx].isGeneratingAudio) {
-                 needsLoading = true;
-                 const newScenes = [...prev];
-                 newScenes[idx] = { ...newScenes[idx], isGeneratingAudio: true };
-                 return newScenes;
-             }
-             return prev;
-        });
-
-        if (!needsLoading) return;
-
-        try {
-            const isClassic = !storyId.startsWith('custom-');
-            const textToSpeak = currentScenes[idx].narrative;
-            const audioBlobUrl = await generateSpeech(textToSpeak, isClassic, storyId, idx);
-            
-            saveCachedMedia(storyId, idx, { audioUrl: audioBlobUrl });
-            setScenes(prev => {
-                const newScenes = [...prev];
-                newScenes[idx] = { 
-                    ...newScenes[idx], 
-                    audioUrl: audioBlobUrl, 
-                    isGeneratingAudio: false 
-                };
-                return newScenes;
-            });
-        } catch (e) {
-            console.error(`Failed to generate audio for scene ${idx}`, e);
-            setScenes(prev => {
-                const newScenes = [...prev];
-                newScenes[idx] = { ...newScenes[idx], isGeneratingAudio: false };
-                return newScenes;
-            });
-        }
-    };
-
-    loadSceneAudio(startIndex);
-  }, []);
 
   const handleNext = () => {
     if (currentSceneIndex < scenes.length - 1 && selectedStory) {
       const nextIndex = currentSceneIndex + 1;
       setCurrentSceneIndex(nextIndex);
       
-      // Lookahead: Trigger loading for index + 1 (the one after the new current)
-      // We run these parallel now as the heavy initial load is likely done
-      triggerImageGeneration(selectedStory.id, scenes, nextIndex + 1);
-      triggerAudioGeneration(selectedStory.id, scenes, nextIndex + 1);
+      // --- LOOKAHEAD STRATEGY ---
+      // 1. Ensure current (newly visible) scene is loaded
+      triggerSceneAssets(selectedStory.id, scenes, nextIndex);
+
+      // 2. Prefetch next 2 scenes
+      triggerSceneAssets(selectedStory.id, scenes, nextIndex + 1);
+      triggerSceneAssets(selectedStory.id, scenes, nextIndex + 2);
+
     } else {
       setAppState('finished');
     }
@@ -318,7 +287,7 @@ const App: React.FC = () => {
   };
 
   const handleReturnToLibrary = () => {
-    clearAllTimeouts(); // Stop all background loading
+    activeGenerations.current.clear();
     setAppState('library');
     setScenes([]);
     setCurrentSceneIndex(0);
